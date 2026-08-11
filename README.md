@@ -63,6 +63,19 @@ You can also start it from the desktop shortcut:
 ~/Desktop/Solar\ Camera.desktop
 ```
 
+## Create launchers
+
+To create both the desktop shortcut and the start-menu entry:
+
+```bash
+cd /home/petecodes/share/solarcamera
+./install_launchers.sh
+```
+
+This creates:
+- `~/Desktop/Solar Camera.desktop`
+- `~/.local/share/applications/solar-camera.desktop`
+
 ## Stop
 
 ```bash
