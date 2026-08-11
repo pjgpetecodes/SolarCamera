@@ -46,6 +46,7 @@ class MainWindow:
         self._astro_gap_seconds = 0
         self._astro_next_capture_at = 0.0
         self._astro_stopping = False
+        self._astro_preview_active = False
 
         self._build_window()
         self._build_layout()
@@ -72,6 +73,15 @@ class MainWindow:
         self.preview_label = tk.Label(preview_frame, bg="black")
         self.preview_label.pack(fill="both", expand=True)
         self.preview_label.bind("<Button-1>", self.on_preview_click)
+        self._preview_frame = preview_frame
+
+        # Thin progress bar overlaid at the top of the preview (shown only in astro+fullscreen)
+        BAR_H = 6
+        self._progress_canvas = tk.Canvas(
+            preview_frame, height=BAR_H, bg="#222", highlightthickness=0
+        )
+        self._progress_bar_rect = None  # created on first show
+        self._progress_bar_after_id: str | None = None
 
         controls_container = tk.Frame(self.root, bg="#1b1b1b")
         controls_container.grid(row=0, column=1, sticky="nsew")
@@ -254,6 +264,8 @@ class MainWindow:
             self._astro_current_frame = frame_number + 1
             self._astro_next_capture_at = time.time() + self._astro_gap_seconds
             self._set_status(f"Astro: Image {frame_number} saved ({jpg_path.name})", hold_seconds=1.5)
+            self._astro_preview_active = True
+            self._show_astro_jpeg(jpg_path)
 
         self.root.after(0, apply)
 
@@ -355,14 +367,16 @@ class MainWindow:
             anchor="w"
         )
 
-        gain_label = tk.Label(controls, text="Gain", fg="white", bg="#1b1b1b")
+        gain_label = tk.Label(controls, text="Gain (ISO 100–3200)", fg="white", bg="#1b1b1b")
         gain_label.pack(anchor="w", pady=(12, 2))
         self.astro_gain_value = tk.DoubleVar(value=self.settings.default_astro_gain)
-        self.astro_gain_display_var = tk.StringVar(value=f"Gain {self.astro_gain_value.get():.1f}")
+        self.astro_gain_display_var = tk.StringVar(
+            value=f"Gain {self.astro_gain_value.get():.1f}  (ISO {int(self.astro_gain_value.get() * 100)})"
+        )
         astro_gain_slider = tk.Scale(
             controls,
             from_=1.0,
-            to=16.0,
+            to=32.0,
             resolution=0.5,
             orient="horizontal",
             variable=self.astro_gain_value,
@@ -401,8 +415,13 @@ class MainWindow:
         else:
             self.root.after(0, self._handle_stream_stopped_ui)
 
+        if self._astro_preview_active:
+            return
+
         def draw() -> None:
             if self._closing or not self.preview_label.winfo_exists():
+                return
+            if self._astro_preview_active:
                 return
             try:
                 width = self.preview_label.winfo_width()
@@ -420,6 +439,23 @@ class MainWindow:
             return
         self.root.after(0, draw)
 
+    def _show_astro_jpeg(self, jpg_path: Path) -> None:
+        if self._closing or not self.preview_label.winfo_exists():
+            return
+        try:
+            from PIL import Image
+            img = Image.open(jpg_path)
+            width = self.preview_label.winfo_width()
+            height = self.preview_label.winfo_height()
+            if width <= 1 or height <= 1:
+                width, height = 900, 720
+            img = img.resize((width, height))
+            photo = ImageTk.PhotoImage(img)
+            self.preview_image = photo
+            self.preview_label.configure(image=photo)
+        except (OSError, tk.TclError):
+            pass
+
     def _handle_stream_stopped_ui(self) -> None:
         if self._closing or not self.livestream_toggle_btn.winfo_exists():
             return
@@ -435,9 +471,65 @@ class MainWindow:
         if self.panel_visible:
             self.controls_container.grid()
             self.root.grid_columnconfigure(1, weight=2)
+            self._hide_progress_bar()
         else:
             self.controls_container.grid_remove()
             self.root.grid_columnconfigure(1, weight=0)
+            if self.capture_mode == "astro" and (self.astro.is_running or self._astro_stopping):
+                self._show_progress_bar()
+
+    # ------------------------------------------------------------------ #
+    # Astro exposure progress bar (overlay, shown only when fullscreen)   #
+    # ------------------------------------------------------------------ #
+
+    def _show_progress_bar(self) -> None:
+        c = self._progress_canvas
+        c.place(relx=0, rely=0, relwidth=1)
+        if self._progress_bar_rect is None:
+            self._progress_bar_rect = c.create_rectangle(0, 0, 0, 6, fill="#4da6ff", outline="")
+        self._tick_progress_bar()
+
+    def _hide_progress_bar(self) -> None:
+        if self._progress_bar_after_id is not None:
+            self.root.after_cancel(self._progress_bar_after_id)
+            self._progress_bar_after_id = None
+        self._progress_canvas.place_forget()
+
+    def _tick_progress_bar(self) -> None:
+        self._progress_bar_after_id = None
+        if self._closing or self.panel_visible:
+            return
+        if self.capture_mode != "astro" or (not self.astro.is_running and not self._astro_stopping):
+            self._hide_progress_bar()
+            return
+
+        c = self._progress_canvas
+        total_width = c.winfo_width()
+        if total_width < 2:
+            total_width = self.root.winfo_width()
+
+        exposure = self.astro_exposure_value.get()
+        if self._astro_capture_phase == "capturing" and self._astro_capture_started_at > 0:
+            elapsed = time.time() - self._astro_capture_started_at
+            fraction = max(0.0, min(1.0, 1.0 - elapsed / exposure))
+            colour = "#4da6ff"  # blue while exposing
+        elif self._astro_capture_phase == "waiting" and self._astro_gap_seconds > 0:
+            remaining_gap = max(0.0, self._astro_next_capture_at - time.time())
+            fraction = remaining_gap / self._astro_gap_seconds
+            colour = "#ffaa33"  # amber during gap
+        elif self._astro_stopping:
+            elapsed = time.time() - self._astro_capture_started_at
+            fraction = max(0.0, min(1.0, 1.0 - elapsed / exposure))
+            colour = "#ff5555"  # red while stopping
+        else:
+            fraction = 1.0
+            colour = "#4da6ff"
+
+        bar_w = int(total_width * fraction)
+        c.coords(self._progress_bar_rect, 0, 0, bar_w, 6)
+        c.itemconfigure(self._progress_bar_rect, fill=colour)
+
+        self._progress_bar_after_id = self.root.after(100, self._tick_progress_bar)
 
     def set_capture_mode(self, mode: str) -> None:
         if mode == self.capture_mode:
@@ -520,7 +612,7 @@ class MainWindow:
 
     def on_astro_gain_change(self, value: str) -> None:
         gain = float(value)
-        self.astro_gain_display_var.set(f"Gain {gain:.1f}")
+        self.astro_gain_display_var.set(f"Gain {gain:.1f}  (ISO {int(gain * 100)})")
         self.settings.default_astro_gain = gain
         self.settings_store.save(self.settings)
 
@@ -556,6 +648,8 @@ class MainWindow:
             self._set_status(str(exc))
             return
         self._set_status(f"Astro: Image 1 saved ({jpg_path.name})")
+        self._astro_preview_active = True
+        self._show_astro_jpeg(jpg_path)
 
     def toggle_astro_sequence(self) -> None:
         if self._astro_stopping:
@@ -599,6 +693,8 @@ class MainWindow:
         self.start_astro_btn.configure(text="Stop Astro Sequence")
         self.astro_capture_btn.configure(state=tk.DISABLED)
         self._start_capture_status_updates()
+        if not self.panel_visible:
+            self._show_progress_bar()
 
     def stop_astro_sequence_async(self) -> None:
         if not self.astro.is_running:
@@ -620,6 +716,8 @@ class MainWindow:
 
     def _finalize_astro_stop_ui(self) -> None:
         self._astro_stopping = False
+        self._astro_preview_active = False
+        self._hide_progress_bar()
         self._stop_capture_status_updates()
         self._astro_capture_phase = "idle"
         if self._closing:
@@ -762,6 +860,7 @@ class MainWindow:
             return
         self._closing = True
         self._stop_capture_status_updates()
+        self._hide_progress_bar()
         if self.timelapse.is_running:
             self.timelapse.stop()
         if self.astro.is_running:

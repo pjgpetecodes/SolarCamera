@@ -99,8 +99,10 @@ shots such as the Milky Way or Perseid meteor showers, where the standard timela
 exposure range (up to 60ms) isn't long enough.
 
 - **Exposure**: 1–239 seconds (the maximum supported by the HQ Camera's IMX477 sensor).
-- **Gain**: 1.0–16.0 analogue gain, independent of the Timelapse mode's ISO slider,
-  since astro shots typically need much higher gain than daytime/solar shots.
+  Default: **20 seconds** (a good starting point for Perseids — the standard advice is 15–25s).
+- **Gain (ISO 100–3200)**: 1.0–32.0 analogue gain, shown with its ISO equivalent.
+  Default: **Gain 16.0 (ISO 1600)**. For Perseids, ISO 1600–3200 (gain 16–32) is recommended;
+  raise gain if the sky is dark enough to avoid too much noise.
 - **Gap between frames**: pause between shots in sequence mode, to let the sensor cool
   and give storage time to catch up.
 - **Capture Single Frame**: takes one long exposure and saves it immediately.

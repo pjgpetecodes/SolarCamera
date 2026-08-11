@@ -16,8 +16,8 @@ class AppSettings:
     frame_height: int = 720
     framerate: int = 30
     bitrate: str = "4500k"
-    default_astro_exposure_seconds: int = 15
-    default_astro_gain: float = 8.0
+    default_astro_exposure_seconds: int = 20
+    default_astro_gain: float = 16.0
     default_astro_gap_seconds: int = 2
 
 
