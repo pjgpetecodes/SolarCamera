@@ -5,6 +5,7 @@ Tkinter fullscreen landscape app for Raspberry Pi 5 + 7" Touch Display 2 + HQ Ca
 Features:
 - live camera preview
 - timelapse start/stop
+- long-exposure astrophotography mode (Milky Way stills, meteor shower sequences)
 - YouTube livestream start/stop
 - exposure and ISO controls
 - USB destination selection for timelapse output
@@ -89,6 +90,45 @@ cd /home/petecodes/share/solarcamera
 - Timelapse output is saved to the selected USB drive.
 - YouTube stream settings are saved in `~/.config/solarcamera/settings.json`.
 - Livestreaming uses the app preview frames, so the preview stays visible while streaming.
+
+## Astro Mode
+
+Use the **Timelapse Mode / Astro Mode** toggle at the top of the controls panel to
+switch between the two capture workflows. Astro Mode is designed for long-exposure
+shots such as the Milky Way or Perseid meteor showers, where the standard timelapse
+exposure range (up to 60ms) isn't long enough.
+
+- **Exposure**: 1–239 seconds (the maximum supported by the HQ Camera's IMX477 sensor).
+- **Gain**: 1.0–16.0 analogue gain, independent of the Timelapse mode's ISO slider,
+  since astro shots typically need much higher gain than daytime/solar shots.
+- **Gap between frames**: pause between shots in sequence mode, to let the sensor cool
+  and give storage time to catch up.
+- **Capture Single Frame**: takes one long exposure and saves it immediately.
+- **Start Astro Sequence / Stop Astro Sequence**: one toggle button starts and stops
+  repeated long-exposure capture, useful for catching meteors or building a stack of
+  Milky Way frames.
+
+Each capture saves both a JPEG (for quick preview) and a raw DNG (for stacking in
+external tools like Siril, DeepSkyStacker, or Sequator). Frames are saved to a
+`solar_astro/astro_session_<timestamp>/` folder on the selected USB destination, numbered
+`astro_frame_000001.jpg` / `.dng`, etc.
+
+Notes:
+- The live preview pauses automatically during each long exposure and resumes
+  afterward.
+- Timelapse and Astro Mode share the camera, so you can't run both at once — switching
+  modes is blocked while either a timelapse or an astro sequence is running.
+- Timelapse also uses a single toggle button (`Start Timelapse` / `Stop Timelapse`).
+- Livestream also uses a single toggle button (`Start Livestream` / `Stop Livestream`).
+- While Timelapse or Astro sequence is running, status text now reports progress:
+  each saved frame is announced once, and countdowns show time until the next
+  capture (Timelapse) or remaining exposure/next exposure gap (Astro).
+- Stopping an Astro sequence waits for the current exposure to finish gracefully:
+  the button enters a temporary stopping state, then returns to `Start Astro Sequence`
+  when shutdown completes.
+- No autofocus or star-tracking is provided; for the sharpest Milky Way/meteor shots,
+  use a fast wide lens, a solid tripod, and keep exposures short enough to avoid visible
+  star trailing for your focal length (the "500 rule" is a good starting point).
 
 ## Troubleshooting
 - If the camera is unavailable, verify `python3-picamera2` is installed.

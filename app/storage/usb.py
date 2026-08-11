@@ -35,7 +35,7 @@ class UsbStorageService:
             return False
         return True
 
-    def session_root(self, mount_point: Path) -> Path:
-        target = mount_point / "solar_timelapse"
+    def session_root(self, mount_point: Path, folder_name: str = "solar_timelapse") -> Path:
+        target = mount_point / folder_name
         target.mkdir(parents=True, exist_ok=True)
         return target

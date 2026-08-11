@@ -32,12 +32,13 @@ class CameraService:
         self._lock = threading.Lock()
         self._manual_exposure_us = 8000
         self._manual_analogue_gain = 1.0
+        self._preview_paused = threading.Event()
 
-        config = self._picam.create_preview_configuration(
+        self._preview_config = self._picam.create_preview_configuration(
             main={"size": (width, height), "format": "RGB888"},
             controls={"FrameRate": framerate},
         )
-        self._picam.configure(config)
+        self._picam.configure(self._preview_config)
         self._picam.start()
 
     def start_preview(self, frame_callback: FrameCallback) -> None:
@@ -47,7 +48,12 @@ class CameraService:
 
         def worker() -> None:
             while self._running:
+                if self._preview_paused.is_set():
+                    self._preview_paused.wait(timeout=0.5)
+                    continue
                 with self._lock:
+                    if self._preview_paused.is_set():
+                        continue
                     frame_array = self._picam.capture_array()
                 # picamera2 preview arrays can arrive as BGR; remap to RGB for Tk display.
                 frame_image = Image.fromarray(frame_array[:, :, ::-1], mode="RGB")
@@ -88,6 +94,53 @@ class CameraService:
     def capture_still(self, output_path: Path) -> None:
         with self._lock:
             self._picam.capture_file(str(output_path))
+
+    def capture_long_exposure(
+        self,
+        jpg_path: Path,
+        dng_path: Path,
+        exposure_seconds: float,
+        gain: float,
+    ) -> None:
+        """Pause the preview, switch to a still+raw config, and take one long exposure.
+
+        Saves a JPEG (for quick review) and a raw DNG (for stacking) to the given
+        paths, then restores the previous preview configuration and controls.
+        """
+        exposure_us = max(1_000_000, int(exposure_seconds * 1_000_000))
+        # Give the sensor a little headroom over the requested exposure time.
+        frame_duration_limit = exposure_us + 200_000
+
+        self._preview_paused.set()
+        with self._lock:
+            try:
+                still_config = self._picam.create_still_configuration(
+                    main={"size": (self.width, self.height)},
+                    raw={},
+                    controls={
+                        "FrameDurationLimits": (frame_duration_limit, frame_duration_limit),
+                        "AeEnable": False,
+                        "ExposureTime": exposure_us,
+                        "AnalogueGain": float(gain),
+                    },
+                )
+                self._picam.switch_mode(still_config)
+                request = self._picam.capture_request()
+                try:
+                    request.save("main", str(jpg_path))
+                    request.save_dng(str(dng_path))
+                finally:
+                    request.release()
+            finally:
+                self._picam.switch_mode(self._preview_config)
+                self._picam.set_controls(
+                    {
+                        "AeEnable": False,
+                        "ExposureTime": int(self._manual_exposure_us),
+                        "AnalogueGain": float(self._manual_analogue_gain),
+                    }
+                )
+                self._preview_paused.clear()
 
     def close(self) -> None:
         self.stop_preview()

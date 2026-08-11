@@ -4,12 +4,12 @@ import datetime as dt
 import shlex
 import subprocess
 import threading
-import time
 from pathlib import Path
 from typing import Callable
 
 
 CaptureFunc = Callable[[Path], None]
+FrameCapturedCallback = Callable[[int, Path], None]
 
 
 class TimelapseService:
@@ -17,6 +17,7 @@ class TimelapseService:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._session_dir: Path | None = None
+        self._frame_count = 0
 
     @property
     def is_running(self) -> bool:
@@ -26,7 +27,17 @@ class TimelapseService:
     def session_dir(self) -> Path | None:
         return self._session_dir
 
-    def start(self, capture_func: CaptureFunc, output_root: Path, interval_seconds: int) -> Path:
+    @property
+    def frame_count(self) -> int:
+        return self._frame_count
+
+    def start(
+        self,
+        capture_func: CaptureFunc,
+        output_root: Path,
+        interval_seconds: int,
+        on_frame_captured: FrameCapturedCallback | None = None,
+    ) -> Path:
         if self.is_running:
             raise RuntimeError("Timelapse is already running.")
         if interval_seconds <= 0:
@@ -35,6 +46,7 @@ class TimelapseService:
         timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
         self._session_dir = output_root / f"session_{timestamp}"
         self._session_dir.mkdir(parents=True, exist_ok=True)
+        self._frame_count = 0
         self._stop_event.clear()
 
         def run() -> None:
@@ -43,6 +55,9 @@ class TimelapseService:
                 frame_path = self._session_dir / f"frame_{frame_number:06d}.jpg"
                 capture_func(frame_path)
                 frame_number += 1
+                self._frame_count = frame_number
+                if on_frame_captured is not None:
+                    on_frame_captured(frame_number, frame_path)
                 self._stop_event.wait(interval_seconds)
 
         self._thread = threading.Thread(target=run, name="timelapse-capture", daemon=True)
