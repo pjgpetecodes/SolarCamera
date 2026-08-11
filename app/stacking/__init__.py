@@ -1,0 +1,2 @@
+"""Astrophotography frame stacking services."""
+

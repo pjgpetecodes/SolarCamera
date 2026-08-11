@@ -23,13 +23,21 @@ The app is designed for a **720x1280 panel mounted in landscape**, so the UI tar
 
 ## Install
 
+Quick setup (recommended):
+```bash
+cd /home/petecodes/share/solarcamera
+./install_dependencies.sh
+```
+
+Manual setup:
+
 1. Update packages:
    ```bash
    sudo apt update
    ```
 2. Install required system packages:
    ```bash
-   sudo apt install -y python3-tk python3-picamera2 python3-pil.imagetk ffmpeg rpicam-apps python3-venv
+   sudo apt install -y python3-tk python3-picamera2 python3-pil.imagetk ffmpeg rpicam-apps python3-venv siril
    ```
 3. Go to the project folder:
    ```bash
@@ -109,11 +117,16 @@ exposure range (up to 60ms) isn't long enough.
 - **Start Astro Sequence / Stop Astro Sequence**: one toggle button starts and stops
   repeated long-exposure capture, useful for catching meteors or building a stack of
   Milky Way frames.
+- **Stack Now**: after stopping a sequence, runs a Siril CLI starfield stack on-device
+  (requires at least 3 astro JPEG frames and Siril installed).
 
 Each capture saves both a JPEG (for quick preview) and a raw DNG (for stacking in
 external tools like Siril, DeepSkyStacker, or Sequator). Frames are saved to a
 `solar_astro/astro_session_<timestamp>/` folder on the selected USB destination, numbered
 `astro_frame_000001.jpg` / `.dng`, etc.
+Stack outputs are written under `astro_session_<timestamp>/stacked/` as:
+- `stacked_starfield.tif`
+- `stack.log`
 
 Notes:
 - The live preview pauses automatically during each long exposure and resumes
@@ -127,6 +140,8 @@ Notes:
   capture (Timelapse) or remaining exposure/next exposure gap (Astro).
 - Astro captures lock white balance for each run (single shot or sequence), which
   reduces frame-to-frame colour shifts in night sky scenes.
+- If Siril is missing, the app keeps capture working and shows an install hint when
+  you press **Stack Now**.
 - Stopping an Astro sequence waits for the current exposure to finish gracefully:
   the button enters a temporary stopping state, then returns to `Start Astro Sequence`
   when shutdown completes.

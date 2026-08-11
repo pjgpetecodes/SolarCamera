@@ -12,6 +12,7 @@ from PIL import ImageTk
 from app.astro.service import AstroService
 from app.camera.service import CameraService, CameraUnavailableError
 from app.config.settings import AppSettings, SettingsStore
+from app.stacking.service import StackResult, StackingService
 from app.storage.usb import UsbStorageService
 from app.streaming.service import StreamingService
 from app.timelapse.service import TimelapseService
@@ -26,6 +27,7 @@ class MainWindow:
         self.streaming.configure(self.settings.stream_url, self.settings.stream_key)
         self.timelapse = TimelapseService()
         self.astro = AstroService()
+        self.stacking = StackingService()
         self.storage = UsbStorageService()
         self.camera: CameraService | None = None
         self.preview_image: ImageTk.PhotoImage | None = None
@@ -47,11 +49,13 @@ class MainWindow:
         self._astro_next_capture_at = 0.0
         self._astro_stopping = False
         self._astro_preview_active = False
+        self._stacking_running = False
 
         self._build_window()
         self._build_layout()
         self._init_camera()
         self.refresh_usb_mounts()
+        self._update_stack_button_state()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     def _build_window(self) -> None:
@@ -345,6 +349,14 @@ class MainWindow:
             height=2,
         )
         self.start_astro_btn.pack(fill="x", pady=(8, 0))
+        self.stack_astro_btn = tk.Button(
+            btn_frame,
+            text="Stack Now",
+            command=self.stack_astro_now,
+            state=tk.DISABLED,
+            height=2,
+        )
+        self.stack_astro_btn.pack(fill="x", pady=(8, 0))
 
         exp_label = tk.Label(controls, text="Exposure (seconds)", fg="white", bg="#1b1b1b")
         exp_label.pack(anchor="w", pady=(14, 2))
@@ -456,6 +468,79 @@ class MainWindow:
         except (OSError, tk.TclError):
             pass
 
+    def _current_astro_session_dir(self) -> Path | None:
+        if self.astro.session_dir is not None:
+            return self.astro.session_dir
+        if self.last_session_dir is None:
+            return None
+        if self.last_session_dir.name.startswith("astro_session_"):
+            return self.last_session_dir
+        return None
+
+    def _update_stack_button_state(self) -> None:
+        if not hasattr(self, "stack_astro_btn") or not self.stack_astro_btn.winfo_exists():
+            return
+        if self._stacking_running or self.astro.is_running or self._astro_stopping:
+            self.stack_astro_btn.configure(state=tk.DISABLED)
+            return
+        session_dir = self._current_astro_session_dir()
+        if session_dir is None or not session_dir.exists():
+            self.stack_astro_btn.configure(state=tk.DISABLED)
+            return
+        frame_count = self.stacking.count_jpg_frames(session_dir)
+        available, _ = self.stacking.check_siril_available()
+        if available and frame_count >= 3:
+            self.stack_astro_btn.configure(state=tk.NORMAL)
+            return
+        self.stack_astro_btn.configure(state=tk.DISABLED)
+
+    def _set_stack_status(self, message: str) -> None:
+        self._set_status_threadsafe(message)
+
+    def stack_astro_now(self) -> None:
+        if self._stacking_running:
+            return
+        session_dir = self._current_astro_session_dir()
+        if session_dir is None:
+            self._set_status("No astro session available to stack yet.")
+            return
+        available, msg = self.stacking.check_siril_available()
+        if not available:
+            self._set_status(msg)
+            return
+        frame_count = self.stacking.count_jpg_frames(session_dir)
+        if frame_count < 3:
+            self._set_status(f"Need at least 3 astro frames to stack (found {frame_count}).")
+            return
+
+        self._stacking_running = True
+        self.stack_astro_btn.configure(text="Stacking...", state=tk.DISABLED)
+        self._set_status(f"Stacking {frame_count} frames from {session_dir.name}...")
+
+        def worker() -> None:
+            result = self.stacking.stack_starfield(session_dir, status_callback=self._set_stack_status)
+            try:
+                self.root.after(0, lambda: self._finalize_stack_job(result))
+            except tk.TclError:
+                pass
+
+        threading.Thread(target=worker, name="astro-stack-worker", daemon=True).start()
+
+    def _finalize_stack_job(self, result: StackResult) -> None:
+        self._stacking_running = False
+        if self._closing:
+            return
+        if self.stack_astro_btn.winfo_exists():
+            self.stack_astro_btn.configure(text="Stack Now")
+        self._update_stack_button_state()
+        if result.success and result.output_path is not None:
+            if result.preview_path is not None:
+                self._set_status(f"Stack complete — preview: {result.preview_path}")
+            else:
+                self._set_status(f"Stack complete: {result.output_path}")
+            return
+        self._set_status(result.error or f"Stack failed. See log: {result.log_path}")
+
     def _handle_stream_stopped_ui(self) -> None:
         if self._closing or not self.livestream_toggle_btn.winfo_exists():
             return
@@ -549,6 +634,7 @@ class MainWindow:
             self.timelapse_frame.pack_forget()
             self.astro_frame.pack(fill="x")
             self.status_var.set("Astro Mode selected.")
+            self._update_stack_button_state()
         else:
             self.astro_frame.pack_forget()
             self.timelapse_frame.pack(fill="x")
@@ -651,6 +737,7 @@ class MainWindow:
         self._set_status(f"Astro: Image 1 saved ({jpg_path.name})")
         self._astro_preview_active = True
         self._show_astro_jpeg(jpg_path)
+        self._update_stack_button_state()
 
     def toggle_astro_sequence(self) -> None:
         if self._astro_stopping:
@@ -694,6 +781,7 @@ class MainWindow:
         self._set_status(f"Astro: Sequence started ({self.last_session_dir.name})", hold_seconds=1.5)
         self.start_astro_btn.configure(text="Stop Astro Sequence")
         self.astro_capture_btn.configure(state=tk.DISABLED)
+        self.stack_astro_btn.configure(state=tk.DISABLED)
         self._start_capture_status_updates()
         if not self.panel_visible:
             self._show_progress_bar()
@@ -728,6 +816,7 @@ class MainWindow:
             self.start_astro_btn.configure(text="Start Astro Sequence", state=tk.NORMAL)
         if self.astro_capture_btn.winfo_exists():
             self.astro_capture_btn.configure(state=tk.NORMAL)
+        self._update_stack_button_state()
         self._set_status(
             f"Astro sequence stopped. {self.astro.frame_count} frame(s) saved to {self.astro.session_dir}"
         )
