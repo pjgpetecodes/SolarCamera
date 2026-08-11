@@ -643,6 +643,7 @@ class MainWindow:
         self._set_status(f"Astro: Capturing single frame ({exposure}s)...")
         self.root.update_idletasks()
         try:
+            self.camera.reset_astro_white_balance_lock()
             jpg_path = self.astro.capture_single(self._astro_capture_frame, output_root)
         except RuntimeError as exc:
             self._set_status(str(exc))
@@ -681,6 +682,7 @@ class MainWindow:
         self._astro_current_frame = 1
         self._astro_capture_started_at = time.time()
         self._astro_next_capture_at = 0.0
+        self.camera.reset_astro_white_balance_lock()
         self.last_session_dir = self.astro.start(
             capture_func=self._astro_capture_frame,
             output_root=output_root,

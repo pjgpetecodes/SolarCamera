@@ -33,6 +33,7 @@ class CameraService:
         self._manual_exposure_us = 8000
         self._manual_analogue_gain = 1.0
         self._preview_paused = threading.Event()
+        self._astro_colour_gains: tuple[float, float] | None = None
 
         self._preview_config = self._picam.create_preview_configuration(
             main={"size": (width, height), "format": "RGB888"},
@@ -91,6 +92,24 @@ class CameraService:
         with self._lock:
             self._picam.set_controls({"AeEnable": True})
 
+    def reset_astro_white_balance_lock(self) -> None:
+        """Force astro captures to pick and lock fresh colour gains next time."""
+        self._astro_colour_gains = None
+
+    def _resolve_astro_colour_gains(self) -> tuple[float, float]:
+        if self._astro_colour_gains is not None:
+            return self._astro_colour_gains
+        metadata = self._picam.capture_metadata()
+        gains = metadata.get("ColourGains")
+        if isinstance(gains, (tuple, list)) and len(gains) >= 2:
+            red = float(gains[0])
+            blue = float(gains[1])
+        else:
+            # Stable fallback if metadata doesn't contain colour gains yet.
+            red, blue = 2.0, 2.0
+        self._astro_colour_gains = (red, blue)
+        return self._astro_colour_gains
+
     def capture_still(self, output_path: Path) -> None:
         with self._lock:
             self._picam.capture_file(str(output_path))
@@ -114,12 +133,15 @@ class CameraService:
         self._preview_paused.set()
         with self._lock:
             try:
+                colour_gains = self._resolve_astro_colour_gains()
                 still_config = self._picam.create_still_configuration(
                     main={"size": (self.width, self.height)},
                     raw={},
                     controls={
                         "FrameDurationLimits": (frame_duration_limit, frame_duration_limit),
                         "AeEnable": False,
+                        "AwbEnable": False,
+                        "ColourGains": colour_gains,
                         "ExposureTime": exposure_us,
                         "AnalogueGain": float(gain),
                     },
@@ -136,6 +158,7 @@ class CameraService:
                 self._picam.set_controls(
                     {
                         "AeEnable": False,
+                        "AwbEnable": True,
                         "ExposureTime": int(self._manual_exposure_us),
                         "AnalogueGain": float(self._manual_analogue_gain),
                     }

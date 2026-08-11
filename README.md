@@ -125,6 +125,8 @@ Notes:
 - While Timelapse or Astro sequence is running, status text now reports progress:
   each saved frame is announced once, and countdowns show time until the next
   capture (Timelapse) or remaining exposure/next exposure gap (Astro).
+- Astro captures lock white balance for each run (single shot or sequence), which
+  reduces frame-to-frame colour shifts in night sky scenes.
 - Stopping an Astro sequence waits for the current exposure to finish gracefully:
   the button enters a temporary stopping state, then returns to `Start Astro Sequence`
   when shutdown completes.
