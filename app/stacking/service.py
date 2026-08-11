@@ -90,7 +90,9 @@ class StackingService:
                 "requires 1.2.0",
                 f"cd {lights_dir}",
                 f"convert {sequence_name}",
-                f"register {sequence_name}",
+                # Use shift-only registration: more robust with few stars/frames,
+                # avoids over-fitting rotations that cause blur.
+                f"register {sequence_name} -transf=shift",
                 f"stack {registered_name} rej 3 3 -norm=no -out={stacked_dir}/stacked_starfield",
                 "close",
                 "",
@@ -122,7 +124,8 @@ class StackingService:
             [
                 "requires 1.2.0",
                 f"load {stacked_dir}/stacked_starfield",
-                "autostretch",
+                # Linked stretch keeps RGB ratios intact (no colour shift).
+                "autostretch -linked",
                 f"savejpg {stacked_dir}/stacked_starfield_preview 95",
                 "close",
                 "",
